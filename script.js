@@ -21,6 +21,10 @@ function showScreen(name) {
     entry[1].classList.toggle('active', entry[0] === name);
   });
   window.scrollTo({ top: 0, behavior: 'smooth' });
+  // 移动端地址栏回收
+  if (name === 'intro') {
+    setTimeout(function() { window.scrollTo(0, 1); }, 100);
+  }
 }
 
 function shuffle(array) {
@@ -78,6 +82,13 @@ function renderQuestions() {
       var value = Number(e.target.value);
       app.answers[name] = value;
 
+      // 高亮选中的选项
+      var questionCard = e.target.closest('.question');
+      questionCard.querySelectorAll('.option').forEach(function(opt) {
+        opt.classList.remove('selected');
+      });
+      e.target.closest('.option').classList.add('selected');
+
       if (name === 'drink_gate_q1') {
         if (value !== 3) {
           delete app.answers['drink_gate_q2'];
@@ -87,6 +98,21 @@ function renderQuestions() {
       }
 
       updateProgress();
+
+      // 移动端：自动滚动到下一题
+      if (window.innerWidth <= 600) {
+        var nextCard = questionCard.nextElementSibling;
+        if (nextCard) {
+          setTimeout(function() {
+            nextCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }, 250);
+        } else {
+          // 最后一题，滚动到底部按钮区
+          setTimeout(function() {
+            document.querySelector('.actions-bottom').scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }, 250);
+        }
+      }
     });
   });
 

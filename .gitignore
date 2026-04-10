@@ -9,6 +9,7 @@ logs
 .DS_Store
 .fleet
 .idea
+.workbuddy
 
 # Local env files
 .env
