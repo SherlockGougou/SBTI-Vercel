@@ -5,8 +5,6 @@
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/SherlockGougou/SBTI-Vercel)
 [![License: Non-commercial](https://img.shields.io/badge/license-non--commercial-green)](#版权与致谢)
 
-**在线体验：** https://sbti.unun.dev
-
 ---
 
 ## 简介
