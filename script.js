@@ -1,3 +1,75 @@
+/* ─────────────────────────────────────────────
+   SBTI – main script with i18n support
+   ───────────────────────────────────────────── */
+
+var currentLang = (function() {
+  try {
+    var saved = localStorage.getItem('sbti_lang');
+    if (saved === 'en' || saved === 'zh') return saved;
+  } catch(e) {}
+  // Auto-detect from browser language
+  var navLang = (navigator.language || navigator.userLanguage || '').toLowerCase();
+  if (navLang.indexOf('zh') === 0) return 'zh';
+  return 'en';
+})();
+
+/* ── Theme management ── */
+
+var THEME_CYCLE = ['auto', 'light', 'dark']; // 点击按钮时循环的顺序
+
+function getStoredTheme() {
+  try {
+    var saved = localStorage.getItem('sbti_theme');
+    if (saved === 'auto' || saved === 'light' || saved === 'dark') return saved;
+  } catch(e) {}
+  return 'auto';
+}
+
+function resolveTheme(preference) {
+  if (preference === 'auto') {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  return preference;
+}
+
+function applyTheme(preference) {
+  var resolved = resolveTheme(preference);
+  document.documentElement.setAttribute('data-theme', resolved);
+  // Update meta theme-color
+  var metaTheme = document.querySelector('meta[name="theme-color"]');
+  if (metaTheme) {
+    metaTheme.content = resolved === 'dark' ? '#141c17' : '#f6faf6';
+  }
+  // Update button label
+  var btn = document.getElementById('themeToggleBtn');
+  if (btn) {
+    var icons = { auto: '🌓', light: '☀️', dark: '🌙' };
+    btn.textContent = icons[preference] || '🌓';
+    btn.setAttribute('aria-label', t('themeLabel_' + preference));
+  }
+}
+
+function setTheme(preference) {
+  try { localStorage.setItem('sbti_theme', preference); } catch(e) {}
+  applyTheme(preference);
+}
+
+function cycleTheme() {
+  var current = getStoredTheme();
+  var idx = THEME_CYCLE.indexOf(current);
+  var next = THEME_CYCLE[(idx + 1) % THEME_CYCLE.length];
+  setTheme(next);
+}
+
+// Listen for system color-scheme changes (for auto mode)
+try {
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function() {
+    if (getStoredTheme() === 'auto') {
+      applyTheme('auto');
+    }
+  });
+} catch(e) {}
+
 var app = {
   shuffledQuestions: [],
   answers: {},
@@ -16,16 +88,135 @@ var progressText = document.getElementById('progressText');
 var submitBtn    = document.getElementById('submitBtn');
 var testHint     = document.getElementById('testHint');
 
+/* ── i18n helpers ── */
+
+function t(key) {
+  return I18N.ui[currentLang][key] || I18N.ui.zh[key] || key;
+}
+
+function tFormat(key, replacements) {
+  var str = t(key);
+  Object.keys(replacements).forEach(function(k) {
+    str = str.replace(new RegExp('\\{' + k + '\\}', 'g'), replacements[k]);
+  });
+  return str;
+}
+
+/* ── Language switch ── */
+
+function setLang(lang) {
+  currentLang = lang;
+  try { localStorage.setItem('sbti_lang', lang); } catch(e) {}
+  rebuildQuestionData();
+  TYPE_LIBRARY = buildTypeLibrary();
+  refreshUI();
+}
+
+function toggleLang() {
+  setLang(currentLang === 'zh' ? 'en' : 'zh');
+}
+
+function refreshUI() {
+  var lang = currentLang;
+
+  // HTML lang attribute
+  document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+
+  // Page title & meta
+  document.title = t('pageTitle');
+  var metaDesc = document.querySelector('meta[name="description"]');
+  if (metaDesc) metaDesc.content = t('pageDesc');
+  var ogTitle = document.querySelector('meta[property="og:title"]');
+  if (ogTitle) ogTitle.content = t('ogTitle');
+  var ogDesc = document.querySelector('meta[property="og:description"]');
+  if (ogDesc) ogDesc.content = t('ogDesc');
+
+  // Lang toggle button
+  var langBtn = document.getElementById('langToggleBtn');
+  if (langBtn) langBtn.textContent = t('langToggle');
+
+  // Intro screen
+  var heroTitle = document.querySelector('#intro h1');
+  if (heroTitle) heroTitle.textContent = t('heroTitle');
+  var startBtn = document.getElementById('startBtn');
+  if (startBtn) startBtn.textContent = t('startBtn');
+  // Test screen
+  var backIntroBtn = document.getElementById('backIntroBtn');
+  if (backIntroBtn) backIntroBtn.textContent = t('backHome');
+  var submitBtnEl = document.getElementById('submitBtn');
+  if (submitBtnEl) submitBtnEl.textContent = t('submitBtn');
+
+  // Result screen
+  var analysisTitle = document.querySelector('.analysis-box h3');
+  if (analysisTitle) analysisTitle.textContent = t('analysisTitle');
+  var dimTitle = document.querySelector('.dim-box h3');
+  if (dimTitle) dimTitle.textContent = t('dimTitle');
+  var noteTitle = document.querySelector('.note-box h3');
+  if (noteTitle) noteTitle.textContent = t('noteTitle');
+  var authorSummary = document.querySelector('.author-box summary');
+  if (authorSummary) authorSummary.textContent = t('authorBoxSummary');
+
+  // Author box content
+  var authorP1 = document.getElementById('authorP1');
+  if (authorP1) authorP1.textContent = t('authorP1');
+  var authorP2 = document.getElementById('authorP2');
+  if (authorP2) authorP2.textContent = t('authorP2');
+  var authorP3 = document.getElementById('authorP3');
+  if (authorP3) authorP3.textContent = t('authorP3');
+  var authorP4 = document.getElementById('authorP4');
+  if (authorP4) authorP4.textContent = t('authorP4');
+
+  var restartBtn = document.getElementById('restartBtn');
+  if (restartBtn) restartBtn.textContent = t('restartBtn');
+  var toTopBtn = document.getElementById('toTopBtn');
+  if (toTopBtn) toTopBtn.textContent = t('toTopBtn');
+
+  // Author box expand/collapse CSS pseudo-element content
+  var styleEl = document.getElementById('dynamicLangStyle');
+  if (!styleEl) {
+    styleEl = document.createElement('style');
+    styleEl.id = 'dynamicLangStyle';
+    document.head.appendChild(styleEl);
+  }
+  styleEl.textContent =
+    '.author-box summary::after { content: "' + t('authorBoxExpand') + '"; }' +
+    '.author-box[open] summary::after { content: "' + t('authorBoxCollapse') + '"; }';
+
+  // Re-render questions if on test screen
+  if (screens.test.classList.contains('active')) {
+    // Rebuild shuffled questions with new language text while preserving answer state
+    var newQuestions = buildQuestions();
+    var newSpecial = buildSpecialQuestions();
+    app.shuffledQuestions = app.shuffledQuestions.map(function(sq) {
+      if (sq.special) {
+        return newSpecial.find(function(ns) { return ns.id === sq.id; }) || sq;
+      }
+      return newQuestions.find(function(nq) { return nq.id === sq.id; }) || sq;
+    });
+    renderQuestions();
+  }
+
+  // Re-render result if on result screen
+  if (screens.result.classList.contains('active') && app._lastResult) {
+    renderResultWith(app._lastResult);
+  }
+
+  updateProgress();
+}
+
+/* ── Screen management ── */
+
 function showScreen(name) {
   Object.entries(screens).forEach(function(entry) {
     entry[1].classList.toggle('active', entry[0] === name);
   });
   window.scrollTo({ top: 0, behavior: 'smooth' });
-  // 移动端地址栏回收
   if (name === 'intro') {
     setTimeout(function() { window.scrollTo(0, 1); }, 100);
   }
 }
+
+/* ── Shuffle ── */
 
 function shuffle(array) {
   var arr = array.slice();
@@ -35,6 +226,8 @@ function shuffle(array) {
   }
   return arr;
 }
+
+/* ── Question rendering ── */
 
 function getVisibleQuestions() {
   var visible = app.shuffledQuestions.slice();
@@ -46,8 +239,8 @@ function getVisibleQuestions() {
 }
 
 function getQuestionMetaLabel(q) {
-  if (q.special) return '补充题';
-  return app.previewMode ? dimensionMeta[q.dim].name : '维度已隐藏';
+  if (q.special) return t('questionMetaSpecial');
+  return app.previewMode ? dimensionMeta[q.dim].name : t('questionMetaDimHidden');
 }
 
 function renderQuestions() {
@@ -58,7 +251,7 @@ function renderQuestions() {
     card.className = 'question';
     card.innerHTML =
       '<div class="question-meta">' +
-        '<div class="badge">第 ' + (index + 1) + ' 题</div>' +
+        '<div class="badge">' + tFormat('questionBadge', { n: index + 1 }) + '</div>' +
         '<div>' + getQuestionMetaLabel(q) + '</div>' +
       '</div>' +
       '<div class="question-title">' + q.text + '</div>' +
@@ -82,7 +275,6 @@ function renderQuestions() {
       var value = Number(e.target.value);
       app.answers[name] = value;
 
-      // 高亮选中的选项
       var questionCard = e.target.closest('.question');
       questionCard.querySelectorAll('.option').forEach(function(opt) {
         opt.classList.remove('selected');
@@ -99,7 +291,6 @@ function renderQuestions() {
 
       updateProgress();
 
-      // 移动端：自动滚动到下一题
       if (window.innerWidth <= 600) {
         var nextCard = questionCard.nextElementSibling;
         if (nextCard) {
@@ -107,7 +298,6 @@ function renderQuestions() {
             nextCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
           }, 250);
         } else {
-          // 最后一题，滚动到底部按钮区
           setTimeout(function() {
             document.querySelector('.actions-bottom').scrollIntoView({ behavior: 'smooth', block: 'center' });
           }, 250);
@@ -125,13 +315,13 @@ function updateProgress() {
   var done  = visibleQuestions.filter(function(q) { return app.answers[q.id] !== undefined; }).length;
   var percent = total ? (done / total) * 100 : 0;
   progressBar.style.width = percent + '%';
-  progressText.textContent = done + ' / ' + total;
+  progressText.textContent = tFormat('progressText', { done: done, total: total });
   var complete = done === total && total > 0;
   submitBtn.disabled = !complete;
-  testHint.textContent = complete
-    ? '都做完了。现在可以把你的电子魂魄交给结果页审判。'
-    : '全选完才会放行。世界已经够乱了，起码把题做完整。';
+  testHint.textContent = complete ? t('testHintComplete') : t('testHintIncomplete');
 }
+
+/* ── Score computation ── */
 
 function sumToLevel(score) {
   if (score <= 3) return 'L';
@@ -192,21 +382,21 @@ function computeResult() {
   if (drunkTriggered) {
     finalType    = TYPE_LIBRARY.DRUNK;
     secondaryType = bestNormal;
-    modeKicker   = '隐藏人格已激活';
-    badge        = '匹配度 100% · 酒精异常因子已接管';
-    sub          = '乙醇亲和性过强，系统已直接跳过常规人格审判。';
+    modeKicker   = t('resultModeKickerDrunk');
+    badge        = t('matchBadgeDrunk');
+    sub          = t('subDrunk');
     special      = true;
   } else if (bestNormal.similarity < 60) {
     finalType  = TYPE_LIBRARY.HHHH;
-    modeKicker = '系统强制兜底';
-    badge      = '标准人格库最高匹配仅 ' + bestNormal.similarity + '%';
-    sub        = '标准人格库对你的脑回路集体罢工了，于是系统把你强制分配给了 HHHH。';
+    modeKicker = t('resultModeKickerFallback');
+    badge      = tFormat('matchBadgeFallback', { similarity: bestNormal.similarity });
+    sub        = t('subFallback');
     special    = true;
   } else {
     finalType  = bestNormal;
-    modeKicker = '你的主类型';
-    badge      = '匹配度 ' + bestNormal.similarity + '% · 精准命中 ' + bestNormal.exact + '/15 维';
-    sub        = '维度命中度较高，当前结果可视为你的第一人格画像。';
+    modeKicker = t('resultModeKickerNormal');
+    badge      = tFormat('matchBadgeNormal', { similarity: bestNormal.similarity, exact: bestNormal.exact });
+    sub        = t('subNormal');
     special    = false;
   }
 
@@ -215,41 +405,51 @@ function computeResult() {
            special: special, secondaryType: secondaryType };
 }
 
+/* ── Render dimension list ── */
+
 function renderDimList(result) {
-  var dimList = document.getElementById('dimList');
-  dimList.innerHTML = dimensionOrder.map(function(dim) {
+  var dimListEl = document.getElementById('dimList');
+  var explanations = DIM_EXPLANATIONS;
+  dimListEl.innerHTML = dimensionOrder.map(function(dim) {
     var level       = result.levels[dim];
-    var explanation = DIM_EXPLANATIONS[dim][level];
+    var explanation = explanations[dim][level];
     return '<div class="dim-item">' +
       '<div class="dim-item-top">' +
         '<div class="dim-item-name">' + dimensionMeta[dim].name + '</div>' +
-        '<div class="dim-item-score">' + level + ' / ' + result.rawScores[dim] + '分</div>' +
+        '<div class="dim-item-score">' + tFormat('dimScore', { level: level, score: result.rawScores[dim] }) + '</div>' +
       '</div>' +
       '<p>' + explanation + '</p>' +
       '</div>';
   }).join('');
 }
 
-function renderResult() {
-  var result = computeResult();
-  var type   = result.finalType;
+/* ── Render result ── */
+
+function renderResultWith(result) {
+  var type = result.finalType;
 
   document.getElementById('resultModeKicker').textContent = result.modeKicker;
-  document.getElementById('resultTypeName').textContent   = type.code + '（' + type.cn + '）';
-  document.getElementById('matchBadge').textContent       = result.badge;
-  document.getElementById('resultTypeSub').textContent    = result.sub;
-  document.getElementById('resultDesc').textContent       = type.desc;
-  document.getElementById('posterCaption').textContent    = type.intro;
+
+  // Type name: show code + localized name
+  var typeNameText = currentLang === 'zh'
+    ? type.code + '（' + type.cn + '）'
+    : type.code + ' (' + type.cn + ')';
+  document.getElementById('resultTypeName').textContent = typeNameText;
+
+  document.getElementById('matchBadge').textContent = result.badge;
+  document.getElementById('resultTypeSub').textContent = result.sub;
+  document.getElementById('resultDesc').textContent = type.desc;
+  document.getElementById('posterCaption').textContent = type.intro;
   document.getElementById('funNote').textContent = result.special
-    ? '本测试仅供娱乐。隐藏人格和傻乐兜底都属于作者故意埋的损招，请勿把它当成医学、心理学、相学、命理学或灵异学依据。'
-    : '本测试仅供娱乐，别拿它当诊断、面试、相亲、分手、招魂、算命或人生判决书。你可以笑，但别太当真。';
+    ? t('funNoteSpecial')
+    : t('funNoteNormal');
 
   var posterBox   = document.getElementById('posterBox');
   var posterImage = document.getElementById('posterImage');
   var imageSrc    = TYPE_IMAGES[type.code];
   if (imageSrc) {
     posterImage.src = imageSrc;
-    posterImage.alt = type.code + '（' + type.cn + '）';
+    posterImage.alt = typeNameText;
     posterBox.classList.remove('no-image');
   } else {
     posterImage.removeAttribute('src');
@@ -258,12 +458,21 @@ function renderResult() {
   }
 
   renderDimList(result);
+}
+
+function renderResult() {
+  var result = computeResult();
+  app._lastResult = result;  // cache for re-render on lang switch
+  renderResultWith(result);
   showScreen('result');
 }
+
+/* ── Start test ── */
 
 function startTest(preview) {
   app.previewMode = !!preview;
   app.answers = {};
+  app._lastResult = null;
   var shuffledRegular = shuffle(questions);
   var insertIndex = Math.floor(Math.random() * shuffledRegular.length) + 1;
   app.shuffledQuestions = shuffledRegular.slice(0, insertIndex)
@@ -273,8 +482,16 @@ function startTest(preview) {
   showScreen('test');
 }
 
-document.getElementById('startBtn').addEventListener('click',    function() { startTest(false); });
+/* ── Event bindings ── */
+
+document.getElementById('startBtn').addEventListener('click', function() { startTest(false); });
 document.getElementById('backIntroBtn').addEventListener('click', function() { showScreen('intro'); });
-document.getElementById('submitBtn').addEventListener('click',    renderResult);
-document.getElementById('restartBtn').addEventListener('click',   function() { startTest(false); });
-document.getElementById('toTopBtn').addEventListener('click',     function() { showScreen('intro'); });
+document.getElementById('submitBtn').addEventListener('click', renderResult);
+document.getElementById('restartBtn').addEventListener('click', function() { startTest(false); });
+document.getElementById('toTopBtn').addEventListener('click', function() { showScreen('intro'); });
+document.getElementById('langToggleBtn').addEventListener('click', toggleLang);
+document.getElementById('themeToggleBtn').addEventListener('click', cycleTheme);
+
+/* ── Initial UI refresh ── */
+applyTheme(getStoredTheme());
+refreshUI();
